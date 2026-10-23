@@ -362,6 +362,7 @@ button, input { font: inherit; color: inherit; }
 }
 .meta { margin: 4px 0 0; display: flex; flex-wrap: wrap; column-gap: 10px; font-size: 14.5px; line-height: 1.4; color: var(--muted); }
 .rate, .dist { color: var(--fg); font-weight: var(--strong); white-space: nowrap; }
+.price { color: var(--fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .star { color: var(--accent); }
 .desc { margin: 5px 0 0; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
@@ -402,7 +403,7 @@ button, input { font: inherit; color: inherit; }
   padding: 8px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
 }
 .dock > .trim { position: absolute; left: 0; right: 0; bottom: 100%; }
-.dock-in { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.dock-in { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .dock-btn {
   min-width: 0; min-height: 56px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
@@ -680,6 +681,7 @@ button, input { font: inherit; color: inherit; }
   <div class="dock-in">
     <button type="button" class="dock-btn" id="btnCuisine" aria-haspopup="dialog"><span class="dock-ico" id="icoCuisine"></span><span class="dock-lbl" id="lblCuisine">Cuisine</span></button>
     <button type="button" class="dock-btn" id="btnArea" aria-haspopup="dialog"><span class="dock-ico" id="icoArea"></span><span class="dock-lbl" id="lblArea">Area</span></button>
+    <button type="button" class="dock-btn" id="btnPrice" aria-haspopup="dialog"><span class="dock-ico" id="icoPrice"></span><span class="dock-lbl" id="lblPrice">Price</span></button>
     <button type="button" class="dock-btn" id="btnNear" aria-pressed="false"><span class="dock-ico" id="icoNear"></span><span class="dock-lbl" id="lblNear">Near me</span></button>
   </div>
 </nav>
@@ -718,6 +720,7 @@ button, input { font: inherit; color: inherit; }
     cuisine: SVG('<path d="M3.5 3v5a2 2 0 0 0 4 0V3M5.5 3v18"/><circle cx="16" cy="12" r="6"/><circle cx="16" cy="12" r="2.6"/>'),
     area: SVG('<path d="M12 21s-6.5-5.6-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/>'),
     near: SVG('<path d="M20 4 3.8 10.6l7 2.6 2.6 7z"/>'),
+    price: SVG('<path d="M18 7.2A6.5 6.5 0 1 0 18 16.8"/><path d="M4.5 10.2h9M4.5 13.8h9"/>'),
     map: SVG('<path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/>'),
     list: SVG('<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r=".9"/><circle cx="4.5" cy="12" r=".9"/><circle cx="4.5" cy="18" r=".9"/>'),
     pin: SVG('<path d="M12 21s-6.5-5.6-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/>', 2),
@@ -727,6 +730,8 @@ button, input { font: inherit; color: inherit; }
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const CAT_FIX = { "Hamburger": "Burgers", "Taco": "Tacos", "Authentic Japanese": "Japanese", "Haute French": "French", "Madrilian": "Madrid cuisine", "Chinese noodle": "Chinese noodles" };
   const shortCat = (c) => { const s = String(c || "Place").replace(/\s+restaurant$/i, ""); return CAT_FIX[s] || s; };
+  /* price per person; tools/sync.py sorts Google's range into these by its middle */
+  const TIERS = { 1: ["€", "under €20"], 2: ["€€", "€20–40"], 3: ["€€€", "€40–80"], 4: ["€€€€", "€80 and up"] };
 
   /* ---------- print families: each cuisine emoji wears its family's print ---------- */
   const FAMILIES = {
@@ -742,9 +747,9 @@ button, input { font: inherit; color: inherit; }
   for (const [f, list] of Object.entries(FAMILIES)) list.forEach((e) => FAM_OF.set(e, f));
   const fam = (e) => "pr f-" + (FAM_OF.get(String(e).replace(/️/g, "")) || "other");
 
-  /* several cuisines (or areas) widen the list; a cuisine plus an area narrows it */
+  /* several cuisines (areas, prices) widen the list; a cuisine plus an area narrows it */
   const state = {
-    cuisines: new Set(), areas: new Set(), q: "", qn: "",
+    cuisines: new Set(), areas: new Set(), prices: new Set(), q: "", qn: "",
     near: false, locating: false, pos: null,
     view: "list", listScroll: 0,
     sheet: null, opener: null, more: false,
@@ -767,6 +772,7 @@ button, input { font: inherit; color: inherit; }
       : "";
     return '<div class="body"><' + tag + ' class="name">' + esc(p.name) + "</" + tag + ">" +
       '<p class="meta"><span class="rate"><span class="star" aria-hidden="true">★</span> ' + p.rating.toFixed(1) + '<span class="sr"> stars on Google</span></span>' +
+      (p.price ? '<span class="price">' + esc(p.price) + '<span class="sr"> per person</span></span>' : "") +
       '<span class="dist"' + (state.near && p.d != null ? "" : " hidden") + ">" + (p.d != null ? fmtDist(p.d) : "") + "</span>" +
       "<span>" + esc(p.short) + " in " + esc(p.area) + "</span></p>" +
       '<p class="desc">' + esc(p.desc) + "</p>" +
@@ -785,22 +791,25 @@ button, input { font: inherit; color: inherit; }
   /* ---------- filtering ---------- */
   const label = (e) => LABELS[e] || e;
   const NONE = new Set();
-  function matches(p, cs, as, q) {
-    return (!cs.size || p.emoji.some((e) => cs.has(e))) && (!as.size || as.has(p.area)) && (!q || p.key.includes(q));
+  function matches(p, cs, as, ps, q) {
+    return (!cs.size || p.emoji.some((e) => cs.has(e))) && (!as.size || as.has(p.area)) &&
+      (!ps.size || ps.has(String(p.tier))) && (!q || p.key.includes(q));
   }
+  const tierSyms = () => [...state.prices].sort().map((t) => TIERS[t][0]);
   /* "Spanish or Seafood" up to two picks, "3 cuisines" after that */
   const either = (list, word) => (list.length <= 2 ? list.join(" or ") : list.length + " " + word);
   function phrase() {
     let s = "";
     if (state.cuisines.size) s += " for " + either([...state.cuisines].map((e) => e + " " + label(e)), "cuisines");
     if (state.areas.size) s += " in " + either([...state.areas], "areas");
+    if (state.prices.size) s += " at " + either(tierSyms(), "price levels");
     if (state.qn) s += " matching “" + state.q.trim() + "”";
     return s;
   }
   function update() {
     let n = 0;
     for (const p of PLACES) {
-      const show = matches(p, state.cuisines, state.areas, state.qn);
+      const show = matches(p, state.cuisines, state.areas, state.prices, state.qn);
       p.vis = show;
       if (p.el.hidden === show) p.el.hidden = !show;
       if (show) n++;
@@ -823,7 +832,7 @@ button, input { font: inherit; color: inherit; }
     $("sortNote").textContent = n ? (state.near ? "Sorted by distance" : "Sorted by rating") : "";
     $("sortNote").hidden = !n;
     $("mapStatus").textContent = text;
-    $("clearAll").hidden = !(state.cuisines.size || state.areas.size || state.qn);
+    $("clearAll").hidden = !(state.cuisines.size || state.areas.size || state.prices.size || state.qn);
     $("empty").hidden = n > 0;
   }
 
@@ -839,6 +848,14 @@ button, input { font: inherit; color: inherit; }
     $("lblArea").textContent = as.length === 1 ? as[0] : as.length ? as.length + " areas" : "Area";
     $("btnArea").classList.toggle("is-on", as.length > 0);
     $("btnArea").setAttribute("aria-label", "Area: " + (as.length ? as.join(", ") : "all"));
+
+    /* one level: "€€"; a run of levels: "€–€€€"; gaps: "2 prices" */
+    const ts = [...state.prices].map(Number).sort(), syms = tierSyms();
+    setIco("icoPrice", ICON.price);
+    $("lblPrice").textContent = !ts.length ? "Price" : ts.length === 1 ? syms[0] :
+      ts[ts.length - 1] - ts[0] === ts.length - 1 ? syms[0] + "–" + syms[syms.length - 1] : ts.length + " prices";
+    $("btnPrice").classList.toggle("is-on", ts.length > 0);
+    $("btnPrice").setAttribute("aria-label", "Price: " + (ts.length ? ts.map((t) => TIERS[t][1]).join(", ") : "all"));
 
     setIco("icoNear", ICON.near);
     $("lblNear").textContent = state.locating ? "Locating…" : "Near me";
@@ -864,12 +881,17 @@ button, input { font: inherit; color: inherit; }
       '<span class="chip-label">' + esc(text) + '</span><span class="chip-count">' + n + '<span class="sr"> places</span></span></button>';
   }
   /* counts on each chip ignore the sheet's own picks, so they say what tapping that chip adds */
+  const sheetSet = () => ({ cuisine: state.cuisines, area: state.areas, price: state.prices })[state.sheet];
   function renderSheet() {
-    const isC = state.sheet === "cuisine";
-    let html = '<p class="sheet-hint">Pick as many as you like.</p>';
-    if (isC) {
+    const kind = state.sheet;
+    let html = '<p class="sheet-hint">' + (kind === "price" ? "Per person, as reported on Google Maps. Pick as many as you like." : "Pick as many as you like.") + "</p>";
+    if (kind === "price") {
+      const counts = new Map(Object.keys(TIERS).map((t) => [t, 0]));
+      for (const p of PLACES) if (p.tier && matches(p, state.cuisines, state.areas, NONE, state.qn)) counts.set(String(p.tier), counts.get(String(p.tier)) + 1);
+      html += '<div class="chips">' + Object.keys(TIERS).map((t) => chip(t, TIERS[t][1], counts.get(t), TIERS[t][0], state.prices)).join("") + "</div>";
+    } else if (kind === "cuisine") {
       const counts = new Map([...CUISINE_TOTAL.keys()].map((e) => [e, 0]));
-      for (const p of PLACES) if (matches(p, NONE, state.areas, state.qn)) p.emoji.forEach((e) => counts.set(e, counts.get(e) + 1));
+      for (const p of PLACES) if (matches(p, NONE, state.areas, state.prices, state.qn)) p.emoji.forEach((e) => counts.set(e, counts.get(e) + 1));
       const byCount = (x, y) => counts.get(y) - counts.get(x) || CUISINE_TOTAL.get(y) - CUISINE_TOTAL.get(x) || label(x).localeCompare(label(y));
       const all = [...CUISINE_TOTAL.keys()];
       const main = all.filter((e) => CUISINE_TOTAL.get(e) >= 3).sort(byCount);
@@ -884,7 +906,7 @@ button, input { font: inherit; color: inherit; }
     } else {
       const counts = new Map();
       for (const p of PLACES) if (!counts.has(p.area)) counts.set(p.area, 0);
-      for (const p of PLACES) if (matches(p, state.cuisines, NONE, state.qn)) counts.set(p.area, counts.get(p.area) + 1);
+      for (const p of PLACES) if (matches(p, state.cuisines, NONE, state.prices, state.qn)) counts.set(p.area, counts.get(p.area) + 1);
       const outside = new Set(PLACES.filter((p) => p.outside).map((p) => p.area));
       const byCount = (x, y) => counts.get(y) - counts.get(x) || x.localeCompare(y);
       const inside = [...counts.keys()].filter((a) => !outside.has(a)).sort(byCount);
@@ -892,10 +914,10 @@ button, input { font: inherit; color: inherit; }
       html += '<div class="chips">' + inside.map((a) => chip(a, a, counts.get(a), "", state.areas)).join("") + "</div>";
       if (away.length) html += '<h3 class="group-title">Outside Madrid</h3><div class="chips">' + away.map((a) => chip(a, a, counts.get(a), "", state.areas)).join("") + "</div>";
     }
-    $("sheetTitle").textContent = isC ? "Cuisine" : "Area";
+    $("sheetTitle").textContent = { cuisine: "Cuisine", area: "Area", price: "Price" }[kind];
     $("sheetBody").innerHTML = html;
     $("sheetDone").textContent = state.count ? "Show " + plural(state.count) : "No places";
-    $("sheetClear").disabled = !(isC ? state.cuisines : state.areas).size;
+    $("sheetClear").disabled = !sheetSet().size;
   }
   const outsideNodes = () => [$("listView"), $("dock"), $("mapView")];
   function openSheet(kind, opener) {
@@ -932,7 +954,7 @@ button, input { font: inherit; color: inherit; }
     const b = e.target.closest(".chip");
     if (!b || b.disabled) return;
     const v = b.dataset.v;
-    const set = state.sheet === "cuisine" ? state.cuisines : state.areas;
+    const set = sheetSet();
     if (set.has(v)) set.delete(v); else set.add(v);
     update();
     const again = $("sheetBody").querySelector('.chip[data-v="' + CSS.escape(v) + '"]');
@@ -940,8 +962,9 @@ button, input { font: inherit; color: inherit; }
   });
   $("btnCuisine").addEventListener("click", (e) => openSheet("cuisine", e.currentTarget));
   $("btnArea").addEventListener("click", (e) => openSheet("area", e.currentTarget));
+  $("btnPrice").addEventListener("click", (e) => openSheet("price", e.currentTarget));
   $("sheetClear").addEventListener("click", () => {
-    (state.sheet === "cuisine" ? state.cuisines : state.areas).clear();
+    sheetSet().clear();
     update();
     $("sheetTitle").focus({ preventScroll: true });
   });
@@ -973,7 +996,7 @@ button, input { font: inherit; color: inherit; }
   });
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
   function clearAll() {
-    state.cuisines.clear(); state.areas.clear(); state.q = ""; state.qn = "";
+    state.cuisines.clear(); state.areas.clear(); state.prices.clear(); state.q = ""; state.qn = "";
     $("q").value = "";
     update();
   }
